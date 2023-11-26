@@ -3,8 +3,8 @@ import json
 import time
 import os
 import tensorflow as tf
-tf.logging.set_verbosity(tf.logging.INFO)
-flags = tf.flags
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
+flags = tf.compat.v1.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('data_dir', 'data', '数据目录')
@@ -21,7 +21,7 @@ def title_iter(title_file):
         for line in file:
             yield list(json.loads(line)['title_features'].keys())
 
-tf.logging.info("\n============ start to generate word idf ===================")
+tf.compat.v1.logging.info("\n============ start to generate word idf ===================")
 start_time = time.time()
 
 vectorizer = TfidfVectorizer(tokenizer=lambda line: line, lowercase=False)
@@ -34,4 +34,4 @@ with open(os.path.join(data_dir, '%s_title_idf.csv' % track_name), 'w') as file:
     for word_id, index in vocabulary.items():
         file.write(word_id + ' ' + str(idf[index]) + '\n')
 
-tf.logging.info("============= Completely. Take %f seconds ====================" % (time.time() - start_time))
+tf.compat.v1.logging.info("============= Completely. Take %f seconds ====================" % (time.time() - start_time))
