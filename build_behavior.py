@@ -8,8 +8,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import tensorflow as tf
 from multiprocessing import Array, Pool, Manager
 
-tf.logging.set_verbosity(tf.logging.INFO)
-flags = tf.flags
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
+flags = tf.compat.v1.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('data_dir', 'data', '数据目录')
@@ -40,13 +40,13 @@ train_file = os.path.join(data_dir, 'final_%s_train.txt' % track_name)
 test_file = os.path.join(data_dir, 'final_%s_test_no_anwser.txt' % track_name)
 names = ['uid', 'user_city', 'item_id', 'author_id', 'item_city', 'channel', 'finish', 'like', 'music_id', 'device_id', 'create_time', 'video_duration']
 
-tf.logging.info("============== start to build behavior and audience feature =================")
-tf.logging.info("============== loading data ==================")
-df_train = pd.read_csv(train_file, sep='\t', names=names)
-df_test = pd.read_csv(test_file, sep='\t', names=names)
+tf.compat.v1.logging.info("============== start to build behavior and audience feature =================")
+tf.compat.v1.logging.info("============== loading data ==================")
+df_train = pd.read_csv(train_file, sep='\t', names=names, encoding='utf-16')
+df_test = pd.read_csv(test_file, sep='\t', names=names, encoding='utf-16')
 df_all = pd.concat([df_train, df_test])
 del df_train, df_test
-tf.logging.info("============== load data successfully ==================")
+tf.compat.v1.logging.info("============== load data successfully ==================")
 
 def group_iter(df, by_name, target_name):
     df_group = df[[by_name, target_name]].groupby(by_name)
@@ -76,24 +76,25 @@ def convert_df(name, max_id, df):
 
 def build_behavior(target_name, vocab_size, df):
     try:
-        tf.logging.info("============== building %s-audience feature =====================" % name)
+        tf.compat.v1.logging.info("============== building %s-audience feature =====================" % target_name)
         
         by_name='uid'
         save_dir = 'user'
         start_time = time.time()
         
-        tf.logging.info("============= %s-audience 开始. 时间: %f ===============" % (name, start_time))
+        tf.compat.v1.logging.info("============= %s-audience 开始. 时间: %f ===============" % (target_name, start_time))
         vocabulary = dict([[x, x] for x in range(vocab_size)])
         fit_transform(df, by_name, target_name, save_dir, vocabulary)
-        tf.logging.info("============= %s-audience 结束, Take %f seconds ===============" % (name, time.time()-start_time))
+        tf.compat.v1.logging.info("============= %s-audience 结束, Take %f seconds ===============" % (target_name, time.time()-start_time))
     except Exception as err:
         print(err)
+
+if __name__ == '__main__':       
+    pool = Pool(4)
+    target_names = [('music_id', max_music_id), ('item_id', max_item_id), ('author_id', max_author_id), ('item_city', max_item_city)]
+    for target_name, vocab_size in target_names:
+        pool.apply_async(build_behavior, args=(target_name, df_all[target_name].max(), df_all))
         
-pool = Pool(4)
-target_names = [('music_id', max_music_id), ('item_id', max_item_id), ('author_id', max_author_id), ('item_city', max_item_city)]
-for target_name, vocab_size in target_names:
-    pool.apply_async(build_behavior, args=(target_name, vocab_size, df_all))
-    
-pool.close()
-pool.join()
-tf.logging.info("All task done")
+    pool.close()
+    pool.join()
+    tf.compat.v1.logging.info("All task done")
