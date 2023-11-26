@@ -8,7 +8,7 @@ import math
 import collections
 import os
 import gc
-from multiprocessing import Array, Pool
+from multiprocessing import Array, Pool, Manager
 import scipy.sparse
 
 shared_arr = None
@@ -102,7 +102,12 @@ def parse_sparse_vector(params):
 
 
 def parse_video_embeddings(line):
-    item = json.loads(line)
+    try:
+        item = json.loads(line)
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON from line: '{line}'")
+        print(f"Error message: {e}")
+        raise e
     if len(item['video_feature_dim_128']) == 128:
         item_id = item['item_id']
         shared_arr_video[item_id, :] = item['video_feature_dim_128']
@@ -117,8 +122,9 @@ def parse_audio_embeddings(line):
 
 def parse_time(item_time):
     item_id, seconds = item_time
-    local_time = time.localtime(seconds)
-    year = local_time.tm_year - 3649
+    local_time = time.localtime(seconds - 52984195200)
+    year = local_time.tm_year #- 3649
+    print(year)
     month = local_time.tm_mon - 1
     mday = local_time.tm_mday - 1
     wday = local_time.tm_wday
@@ -239,7 +245,7 @@ class DataParser:
             name_shapes = {'item': 400, 'author': 400, 'music': 400, 'item_city': 400}
 
         for name, shape in name_shapes.items():
-            tf.logging.info("=============== loading user_%s_behavior info ===================" % name)
+            tf.compat.v1.logging.info("=============== loading user_%s_behavior info ===================" % name)
 
             np_file = os.path.join(self.data_dir, "%s_user_%s_tf.npy" % (self.track_name, name))
             if os.path.exists(np_file):
@@ -257,19 +263,22 @@ class DataParser:
                     for j, row in enumerate(sparse_tfidf):
                         yield (j, row, shape, name)
 
-                pool = Pool(56)
-                pool.map(parse_sparse_vector, row_iter())
-                pool.close()
+                # pool = Pool(56)
+                # pool.map(parse_sparse_vector, row_iter())
+                # pool.close()
+                
+                for params in row_iter():
+                    parse_sparse_vector(params)
 
                 np.save(np_file, shared_arr)
                 end_time = time.time()
-                tf.logging.info("take %f seconds" % (end_time - start_time))
+                tf.compat.v1.logging.info("take %f seconds" % (end_time - start_time))
 
             self.shared_arr_dict['user_%s_ids' % name] = shared_arr[:, :, 0].astype(np.int32)
             self.shared_arr_dict['user_%s_weights' % name] = shared_arr[:, :, 1].astype(np.float32)
             del shared_arr
             gc.collect()
-            tf.logging.info("=============== load user_%s_behavior info successfully ===================" % name)
+            tf.compat.v1.logging.info("=============== load user_%s_behavior info successfully ===================" % name)
 
     def load_audience_feature(self):
         global shared_arr
@@ -282,7 +291,7 @@ class DataParser:
                            'music': (self.feature_dict['music_id'], 500)}
 
         for name, shape in name_shapes.items():
-            tf.logging.info("=============== loading %s_uid_tfidf info ===================" % name)
+            tf.compat.v1.logging.info("=============== loading %s_uid_tfidf info ===================" % name)
 
             np_file = os.path.join(self.data_dir, "%s_%s_uid_tfidf.npy" % (self.track_name, name))
             if os.path.exists(np_file):
@@ -298,16 +307,18 @@ class DataParser:
 
                 def row_iter():
                     for j, row in enumerate(sparse_tfidf):
-                        yield (j, row, shape[1], None)
+                        yield (j, row, shape[1], None, shared_arr)
 
-                pool = Pool(56)
-                pool.map(parse_sparse_vector, row_iter())
-                pool.close()
-
+                # pool = Pool(56)
+                # pool = Pool(1)
+                # pool.map(parse_sparse_vector, row_iter())
+                # pool.close()
+                for params in row_iter():
+                    parse_sparse_vector(params)
                 np.save(np_file, shared_arr)
 
                 end_time = time.time()
-                tf.logging.info("take %f seconds" % (end_time - start_time))
+                tf.compat.v1.logging.info("take %f seconds" % (end_time - start_time))
 
             self.shared_arr_dict['%s_uid_ids' % name] = shared_arr[:, :, 0].astype(np.int32)
             self.shared_arr_dict['%s_uid_weights' % name] = shared_arr[:, :, 1].astype(np.float32)
@@ -315,11 +326,11 @@ class DataParser:
             del shared_arr
             gc.collect()
 
-            tf.logging.info("=============== load %s_uid_tfidf info successfully ===================" % name)
+            tf.compat.v1.logging.info("=============== load %s_uid_tfidf info successfully ===================" % name)
 
     def load_word_idf(self):
         global shared_arr_word_idf
-        tf.logging.info("=============== loading word idf info ===================")
+        tf.compat.v1.logging.info("=============== loading word idf info ===================")
 
         num_words = 134560
         idf_array_base = Array(ctypes.c_float, num_words)
@@ -332,18 +343,18 @@ class DataParser:
             with open(os.path.join(self.data_dir, '%s_title_idf.csv' % self.track_name)) as file:
                 for line in file:
                     word_name, word_idf = line.split(" ")
-                    shared_arr_word_idf[np.int(word_name)] = np.float32(word_idf)
+                    shared_arr_word_idf[int(word_name)] = np.float32(word_idf)
 
                 np.save(np_file, shared_arr_word_idf)
 
-            tf.logging.info('vocab 100 idf: %f' % shared_arr_word_idf[100])
+            tf.compat.v1.logging.info('vocab 100 idf: %f' % shared_arr_word_idf[100])
 
-        tf.logging.info("=============== load word idf info successfully ===================")
+        tf.compat.v1.logging.info("=============== load word idf info successfully ===================")
 
     def load_face_features(self):
         global shared_arr_face
 
-        tf.logging.info("=============== loading face_attrs===================")
+        tf.compat.v1.logging.info("=============== loading face_attrs===================")
 
         np_file = os.path.join(self.data_dir, "%s_face.npy" % self.track_name)
         start_time = time.time()
@@ -355,22 +366,25 @@ class DataParser:
             shared_arr_face = shared_arr_face.reshape(self.feature_dict['item_id'], self.face_feature_size)
 
             with open(os.path.join(self.data_dir, '%s_face_attrs.txt' % self.track_name)) as file:
-                pool = Pool(processes=56)
-                pool.map(parse_face_features, file)
-                pool.close()
+                # pool = Pool(processes=56)
+                # pool.map(parse_face_features, file)
+                # pool.close()
+                
+                for params in file:
+                    parse_face_features(params)
                 np.save(np_file, shared_arr_face)
 
         end_time = time.time()
 
         self.shared_arr_dict['face'] = shared_arr_face
-        tf.logging.info(
+        tf.compat.v1.logging.info(
             "===============load face_attrs successfully - take %f seconds==============" % (end_time - start_time))
         return shared_arr_face
 
     def load_title_features(self):
         global shared_arr_title
 
-        tf.logging.info("=============== loading title features===================")
+        tf.compat.v1.logging.info("=============== loading title features===================")
 
         np_title_file = os.path.join(self.data_dir, "%s_title.npy" % self.track_name)
 
@@ -385,9 +399,12 @@ class DataParser:
             shared_arr_title = shared_arr_title.reshape(self.feature_dict['item_id'], self.max_title_length, 2)
 
             with open(os.path.join(self.data_dir, '%s_title.txt' % self.track_name)) as file:
-                pool = Pool(processes=56)
-                pool.map(parse_title_features, file)
-                pool.close()
+                # pool = Pool(processes=56)
+                # pool.map(parse_title_features, file)
+                # pool.close()
+                
+                for params in file:
+                    parse_title_features(params)
 
                 np.save(np_title_file, shared_arr_title)
 
@@ -398,13 +415,13 @@ class DataParser:
         del shared_arr_title
         gc.collect()
 
-        tf.logging.info(
+        tf.compat.v1.logging.info(
             "===============load title features successfully - take %f seconds==============" % (end_time - start_time))
 
     def load_time_features(self):
         global shared_arr_time
 
-        tf.logging.info("=============== parse time features===================")
+        tf.compat.v1.logging.info("=============== parse time features===================")
 
         np_file = os.path.join(self.data_dir, "%s_time.npy" % self.track_name)
         start_time = time.time()
@@ -412,7 +429,7 @@ class DataParser:
             shared_arr_time = np.load(np_file)
         else:
             item_time_df = pd.read_csv(os.path.join(self.data_dir, '%s_item_create_time.csv' % self.track_name), index_col=0)
-            tf.logging.info("=============== data file has been read completely===================")
+            tf.compat.v1.logging.info("=============== data file has been read completely===================")
 
             shared_arr_time_base = Array(ctypes.c_int32, self.feature_dict['item_id'] * self.time_feature_size)
             shared_arr_time = np.frombuffer(shared_arr_time_base.get_obj(), dtype=np.int32)
@@ -422,15 +439,18 @@ class DataParser:
                 for t in item_time_df.itertuples():
                     yield [t.Index, t.create_time]
 
-            pool = Pool(processes=56)
-            pool.map(parse_time, item_time_iter())
-            pool.close()
+            # pool = Pool(processes=56)
+            # pool.map(parse_time, item_time_iter())
+            # pool.close()
+            
+            for params in item_time_iter():
+                parse_time(params)
 
             np.save(np_file, shared_arr_time)
 
         self.shared_arr_dict['time'] = shared_arr_time
         end_time = time.time()
-        tf.logging.info(
+        tf.compat.v1.logging.info(
             "=========== parse time features successfully - take %d seconds=========" % (end_time - start_time))
 
         return shared_arr_time
@@ -438,7 +458,7 @@ class DataParser:
     def load_audio_embeddings(self):
         global shared_arr_audio
 
-        tf.logging.info("=============== loading audio_embeddings===================")
+        tf.compat.v1.logging.info("=============== loading audio_embeddings===================")
 
         np_file = os.path.join(self.data_dir, "%s_audio.npy" % self.track_name)
 
@@ -456,15 +476,18 @@ class DataParser:
 
             for audio_filename in audio_filenames:
                 with open(os.path.join(self.data_dir, audio_filename)) as file:
-                    pool = Pool(processes=56)
-                    pool.map(parse_audio_embeddings, file)
-                    pool.close()
+                    # pool = Pool(processes=56)
+                    # pool.map(parse_audio_embeddings, file)
+                    # pool.close()
+                    
+                    for params in file:
+                        parse_audio_embeddings(params)
 
             np.save(np_file, shared_arr_audio)
 
         self.shared_arr_dict['audio_weights'] = shared_arr_audio
         end_time = time.time()
-        tf.logging.info("===============load audio_embeddings successfully - take %f seconds==============" % (
+        tf.compat.v1.logging.info("===============load audio_embeddings successfully - take %f seconds==============" % (
                 end_time - start_time))
 
         return shared_arr_audio
@@ -472,7 +495,7 @@ class DataParser:
     def load_video_embeddings(self):
         global shared_arr_video
 
-        tf.logging.info("=============== loading video_embeddings===================")
+        tf.compat.v1.logging.info("=============== loading video_embeddings===================")
         np_file = os.path.join(self.data_dir, "%s_video.npy" % self.track_name)
 
         start_time = time.time()
@@ -490,14 +513,17 @@ class DataParser:
 
             for video_filename in video_filenames:
                 with open(os.path.join(self.data_dir, video_filename)) as file:
-                    pool = Pool(processes=56)
-                    pool.map(parse_video_embeddings, file)
-                    pool.close()
+                    # pool = Pool(processes=56)
+                    # pool.map(parse_video_embeddings, file)
+                    # pool.close()
+                    
+                    for params in file:
+                        parse_video_embeddings(params)
             np.save(np_file, shared_arr_video)
 
         self.shared_arr_dict['video_weights'] = shared_arr_video
         end_time = time.time()
-        tf.logging.info("===============load video_embeddings successfully - take %f seconds==============" % (
+        tf.compat.v1.logging.info("===============load video_embeddings successfully - take %f seconds==============" % (
                 end_time - start_time))
 
         return shared_arr_video
@@ -570,12 +596,12 @@ class DataParser:
         float_feature_names = ['feature_weights', 'video_weights', 'audio_weights', 'word_weights',
                                'item_uid_weights', 'author_uid_weights', 'music_uid_weights']
 
-        writer = tf.python_io.TFRecordWriter(output_file)
+        writer = tf.io.TFRecordWriter(output_file)
 
         count = 1
         for row in chunk.itertuples():
             if count % 20000 == 0:
-                tf.logging.info("Writing example %d" % count)
+                tf.compat.v1.logging.info("Writing example %d" % count)
                 writer.flush()
 
             count += 1
@@ -602,7 +628,7 @@ class DataParser:
 if __name__ == "__main__":
     global cat
 
-    flags = tf.flags
+    flags = tf.compat.v1.flags
     FLAGS = flags.FLAGS
 
     flags.DEFINE_string('data_dir', 'data', '数据目录')
@@ -610,7 +636,7 @@ if __name__ == "__main__":
     flags.DEFINE_integer('chunk_size', None, 'chunk大小')
     flags.DEFINE_integer('num_process', 32, '进程数')
 
-    tf.logging.set_verbosity(tf.logging.INFO)
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
     flags.mark_flag_as_required("track_name")
     flags.mark_flag_as_required("chunk_size")
 
@@ -654,6 +680,9 @@ if __name__ == "__main__":
         else:
             filename = os.path.join(data_dir, 'final_%s_%s_count.txt' % (track_name, cat))
 
-        pool = Pool(FLAGS.num_process)
-        pool.map(to_tf_record, chunk_iter(filename, chunk_size=FLAGS.chunk_size))
-        pool.close()
+        # pool = Pool(FLAGS.num_process)
+        # pool.map(to_tf_record, chunk_iter(filename, chunk_size=FLAGS.chunk_size))
+        # pool.close()
+        
+        for params in chunk_iter(filename, chunk_size=FLAGS.chunk_size):
+            to_tf_record(params)
